@@ -1,5 +1,7 @@
 use minifb::{Window, WindowOptions};
 
+mod scene;
+
 const WIDTH: usize = 800;
 const HEIGHT: usize = 600;
 
