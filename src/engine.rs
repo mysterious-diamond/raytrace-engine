@@ -1,14 +1,29 @@
-use std::ops::{Add, Sub};
+// TODO : 
+// 1. Implement pitch and yaw shift each loop
+// 2. Render result of Scene::render in main.rs
+
+use std::{
+    f64::consts::PI,
+    ops::{Add, Sub},
+};
+
+use crate::{FOV, HEIGHT, VIEW_DISTANCE, WIDTH};
 
 // Scene specific structs
 pub struct Scene {
     objects: Vec<Box<dyn Object>>,
     camera: Camera,
+    light: Light,
 }
 
 pub struct Camera {
     position: Vec3,
     orientation: EulerAngles,
+}
+
+pub struct Light {
+    position: Vec3,
+    color: Color,
 }
 
 // Object structs
@@ -36,9 +51,11 @@ pub struct Hit {
     distance: f32,
     point: Vec3,
     normal: Vec3,
+    surface_color: Color,
 }
 
 // Custom data structs
+#[derive(Clone, Copy)]
 pub struct Color {
     pub r: u8,
     pub g: u8,
@@ -52,6 +69,7 @@ pub struct Vec3 {
     pub z: f64,
 }
 
+#[derive(Clone, Copy)]
 pub struct EulerAngles {
     pub roll: f64,
     pub pitch: f64,
@@ -60,13 +78,13 @@ pub struct EulerAngles {
 
 // traits & implementations
 trait Object {
-    fn intersect(&self, ray: Ray) -> Option<Hit>;
+    fn intersect(&self, ray: &Ray) -> Option<Hit>;
 }
 
 impl Scene {
     pub fn scene_with_sphere() -> Scene {
         let sphere = Sphere {
-            position: Vec3::new(0.0, 0.0, 30.0),
+            position: Vec3::new(30.0, 0.0, 0.0),
             radius: 10.0,
             color: Color::new(4, 2, 115),
         };
@@ -76,12 +94,93 @@ impl Scene {
         Scene {
             objects: vec![boxed],
             camera: Camera::new(Vec3::origin(), EulerAngles::new(0.0, 0.0, 0.0)),
+            light: Light {
+                position: Vec3::new(-10.0, -10.0, 20.0),
+                color: Color::new(255, 255, 255),
+            },
         }
+    }
+
+    pub fn render(&self) -> Vec<u32> {
+        let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
+        let mut angle: EulerAngles = self.camera.orientation;
+        let cam_pos = self.camera.position;
+
+        let yaw = angle.yaw - FOV as f64 / 2.0;
+        let pitch = angle.pitch + FOV as f64 / 2.0 * HEIGHT as f64 / WIDTH as f64;
+
+        angle.yaw = yaw;
+        angle.pitch = pitch;
+
+        for i in 0..buffer.len() {
+            let rad_z = cam_pos.z * PI / 180.0;
+            let rad_y = cam_pos.y * PI / 180.0;
+
+            let end_x = cam_pos.x + VIEW_DISTANCE as f64 * rad_z.cos() * rad_y.cos();
+            let end_y = cam_pos.y + VIEW_DISTANCE as f64 * rad_z.sin() * rad_y.cos();
+            let end_z = cam_pos.z + VIEW_DISTANCE as f64 * rad_z.sin();
+
+            let target = Vec3::new(end_x, end_y, end_z);
+            let res = self.send_ray(cam_pos, target);
+
+            if let Some(val) = res {
+                let mut color = Color::new(
+                    val.surface_color.r * self.light.color.r,
+                    val.surface_color.g * self.light.color.g,
+                    val.surface_color.b * self.light.color.b,
+                );
+
+                let mut light_vec = Vec3::new(
+                    val.point.x - self.light.position.x,
+                    val.point.y - self.light.position.y,
+                    val.point.z - self.light.position.z,
+                );
+
+                light_vec.normalize();
+                let intensity = val.normal.dot(light_vec).max(0.0);
+
+                color.r = ((color.r as f64 / 255.0 * intensity) * 255.0) as u8;
+                color.g = ((color.g as f64 / 255.0 * intensity) * 255.0) as u8;
+                color.b = ((color.b as f64 / 255.0 * intensity) * 255.0) as u8;
+
+                buffer[i] = self.generate_pixel_buf_value(color);
+
+                if (i + 1) % WIDTH == 0 {
+                    angle.yaw = yaw;
+                    pitch -= 
+                }
+            } else {
+                buffer[i] = self.generate_pixel_buf_value(Color::new(0, 0, 0));
+            }
+        }
+
+        buffer
+    }
+
+    fn send_ray(&self, origin: Vec3, target: Vec3) -> Option<Hit> {
+        let ray = Ray {
+            origin,
+            target,
+            direction: target - origin,
+        };
+
+        for object in &self.objects {
+            let res = object.intersect(&ray);
+            if let Some(val) = res {
+                return Some(val);
+            }
+        }
+
+        None
+    }
+
+    fn generate_pixel_buf_value(&self, color: Color) -> u32 {
+        color.r as u32 | (color.g as u32) << 8 | (color.b as u32) << 16
     }
 }
 
 impl Object for Sphere {
-    fn intersect(&self, ray: Ray) -> Option<Hit> {
+    fn intersect(&self, ray: &Ray) -> Option<Hit> {
         // The vector from the origin of the ray to the center of the circle
         let l: Vec3 = ray.origin - self.position;
         let ca: f64 = l.dot(ray.direction);
@@ -109,7 +208,7 @@ impl Object for Sphere {
             let mut normal: Vec3 = point - self.position;
             normal.normalize();
 
-            Some(Hit::new(ray.origin, normal, point))
+            Some(Hit::new(ray.origin, normal, point, self.color))
         }
     }
 }
@@ -178,11 +277,12 @@ impl Camera {
 }
 
 impl Hit {
-    pub fn new(origin: Vec3, normal: Vec3, intersect: Vec3) -> Hit {
+    pub fn new(origin: Vec3, normal: Vec3, intersect: Vec3, surface_color: Color) -> Hit {
         Hit {
             distance: (intersect - origin).magnitude() as f32,
             point: intersect,
             normal,
+            surface_color,
         }
     }
 }

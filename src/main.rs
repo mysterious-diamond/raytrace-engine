@@ -6,6 +6,8 @@ mod engine;
 
 const WIDTH: usize = 800;
 const HEIGHT: usize = 600;
+const FOV: usize = 90;
+const VIEW_DISTANCE: usize = 100;
 
 pub fn main() {
     let mut window = match Window::new(
@@ -24,6 +26,7 @@ pub fn main() {
     let scene = Scene::scene_with_sphere();
 
     while window.is_open() {
+        scene.render();
         window.update();
     }
 }
