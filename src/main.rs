@@ -23,10 +23,16 @@ pub fn main() {
         Err(err) => panic!("Window was not able to be created, {}", err),
     };
 
-    let scene = Scene::scene_with_sphere();
+    let mut scene = Scene::scene_with_sphere();
 
     while window.is_open() {
-        scene.render();
-        window.update();
+        let buffer: Vec<u32> = scene.render();
+
+        match window.update_with_buffer(&buffer, WIDTH, HEIGHT) {
+            Ok(_) => (),
+            Err(err) => panic!("Error in updating window buffer, {}", err),
+        }
+
+        scene.light.position.y += 1.0;
     }
 }

@@ -1,10 +1,11 @@
-// TODO : 
+// TODO :
 // 1. Implement pitch and yaw shift each loop
 // 2. Render result of Scene::render in main.rs
 
+use std::fmt;
 use std::{
     f64::consts::PI,
-    ops::{Add, Sub},
+    ops::{Add, Div, Mul, Sub},
 };
 
 use crate::{FOV, HEIGHT, VIEW_DISTANCE, WIDTH};
@@ -12,8 +13,8 @@ use crate::{FOV, HEIGHT, VIEW_DISTANCE, WIDTH};
 // Scene specific structs
 pub struct Scene {
     objects: Vec<Box<dyn Object>>,
-    camera: Camera,
-    light: Light,
+    pub camera: Camera,
+    pub light: Light,
 }
 
 pub struct Camera {
@@ -22,7 +23,7 @@ pub struct Camera {
 }
 
 pub struct Light {
-    position: Vec3,
+    pub position: Vec3,
     color: Color,
 }
 
@@ -69,11 +70,17 @@ pub struct Vec3 {
     pub z: f64,
 }
 
+// Angle related structs
 #[derive(Clone, Copy)]
 pub struct EulerAngles {
-    pub roll: f64,
-    pub pitch: f64,
-    pub yaw: f64,
+    pub roll: Degree,
+    pub pitch: Degree,
+    pub yaw: Degree,
+}
+
+#[derive(Clone, Copy)]
+pub struct Degree {
+    pub value: f64,
 }
 
 // traits & implementations
@@ -93,7 +100,10 @@ impl Scene {
 
         Scene {
             objects: vec![boxed],
-            camera: Camera::new(Vec3::origin(), EulerAngles::new(0.0, 0.0, 0.0)),
+            camera: Camera::new(
+                Vec3::origin(),
+                EulerAngles::new(0.0.into(), 0.0.into(), 0.0.into()),
+            ),
             light: Light {
                 position: Vec3::new(-10.0, -10.0, 20.0),
                 color: Color::new(255, 255, 255),
@@ -104,30 +114,41 @@ impl Scene {
     pub fn render(&self) -> Vec<u32> {
         let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
         let mut angle: EulerAngles = self.camera.orientation;
+
         let cam_pos = self.camera.position;
+        let black_pix_val = self.generate_pixel_buf_value(Color::new(0, 0, 0));
 
-        let yaw = angle.yaw - FOV as f64 / 2.0;
-        let pitch = angle.pitch + FOV as f64 / 2.0 * HEIGHT as f64 / WIDTH as f64;
+        let total_up_deg: Degree = (FOV as f64 / 2.0 * HEIGHT as f64 / WIDTH as f64).into();
+        let yaw: Degree = angle.yaw - (FOV as f64 / 2.0).into();
+        let pitch: Degree = angle.pitch + total_up_deg;
 
-        angle.yaw = yaw;
+        let pitch_increments: Degree = (angle.pitch - total_up_deg) / (HEIGHT as f64).into();
+        let yaw_increments: Degree = yaw / (WIDTH as f64).into();
+
         angle.pitch = pitch;
+        angle.yaw = yaw;
 
-        for i in 0..buffer.len() {
-            let rad_z = cam_pos.z * PI / 180.0;
-            let rad_y = cam_pos.y * PI / 180.0;
+        for (i, pix) in buffer.iter_mut().enumerate() {
+            let rad_pitch = angle.pitch.value * PI / 180.0;
+            let rad_yaw = angle.yaw.value * PI / 180.0;
 
-            let end_x = cam_pos.x + VIEW_DISTANCE as f64 * rad_z.cos() * rad_y.cos();
-            let end_y = cam_pos.y + VIEW_DISTANCE as f64 * rad_z.sin() * rad_y.cos();
-            let end_z = cam_pos.z + VIEW_DISTANCE as f64 * rad_z.sin();
+            let end_x = cam_pos.x + VIEW_DISTANCE as f64 * rad_pitch.cos() * rad_yaw.cos();
+            let end_y = cam_pos.y + VIEW_DISTANCE as f64 * rad_pitch.sin() * rad_yaw.cos();
+            let end_z = cam_pos.z - VIEW_DISTANCE as f64 * rad_pitch.sin();
 
             let target = Vec3::new(end_x, end_y, end_z);
             let res = self.send_ray(cam_pos, target);
 
             if let Some(val) = res {
+                let surface_color = val.surface_color;
+
                 let mut color = Color::new(
-                    val.surface_color.r * self.light.color.r,
-                    val.surface_color.g * self.light.color.g,
-                    val.surface_color.b * self.light.color.b,
+                    ((surface_color.r as f64 / 255.0) * (self.light.color.r as f64 / 255.0) * 255.0)
+                        as u8,
+                    ((surface_color.g as f64 / 255.0) * (self.light.color.g as f64 / 255.0) * 255.0)
+                        as u8,
+                    ((surface_color.b as f64 / 255.0) * (self.light.color.b as f64 / 255.0) * 255.0)
+                        as u8,
                 );
 
                 let mut light_vec = Vec3::new(
@@ -143,14 +164,16 @@ impl Scene {
                 color.g = ((color.g as f64 / 255.0 * intensity) * 255.0) as u8;
                 color.b = ((color.b as f64 / 255.0 * intensity) * 255.0) as u8;
 
-                buffer[i] = self.generate_pixel_buf_value(color);
-
-                if (i + 1) % WIDTH == 0 {
-                    angle.yaw = yaw;
-                    pitch -= 
-                }
+                *pix = self.generate_pixel_buf_value(color);
             } else {
-                buffer[i] = self.generate_pixel_buf_value(Color::new(0, 0, 0));
+                *pix = black_pix_val;
+            }
+
+            if (i + 1) % WIDTH == 0 {
+                angle.yaw = yaw;
+                angle.pitch = angle.pitch - pitch_increments;
+            } else {
+                angle.yaw = angle.yaw + yaw_increments;
             }
         }
 
@@ -288,8 +311,60 @@ impl Hit {
 }
 
 impl EulerAngles {
-    pub fn new(roll: f64, pitch: f64, yaw: f64) -> EulerAngles {
+    pub fn new(roll: Degree, pitch: Degree, yaw: Degree) -> EulerAngles {
         EulerAngles { roll, pitch, yaw }
+    }
+}
+
+impl Add for Degree {
+    type Output = Self;
+
+    fn add(self, other: Self) -> Self::Output {
+        Degree {
+            value: (self.value + other.value).rem_euclid(360.0),
+        }
+    }
+}
+
+impl Sub for Degree {
+    type Output = Self;
+
+    fn sub(self, other: Self) -> Self::Output {
+        Degree {
+            value: (self.value - other.value).rem_euclid(360.0),
+        }
+    }
+}
+
+impl Mul for Degree {
+    type Output = Self;
+
+    fn mul(self, other: Self) -> Self::Output {
+        Degree {
+            value: (self.value * other.value).rem_euclid(360.0),
+        }
+    }
+}
+
+impl Div for Degree {
+    type Output = Self;
+
+    fn div(self, other: Self) -> Self::Output {
+        Degree {
+            value: (self.value / other.value).rem_euclid(360.0),
+        }
+    }
+}
+
+impl From<f64> for Degree {
+    fn from(num: f64) -> Self {
+        Degree { value: num }
+    }
+}
+
+impl fmt::Display for Degree {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.value)
     }
 }
 
