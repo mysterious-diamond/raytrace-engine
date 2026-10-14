@@ -8,7 +8,7 @@ use std::{
     ops::{Add, Div, Mul, Sub},
 };
 
-use crate::{FOV, HEIGHT, VIEW_DISTANCE, WIDTH};
+use crate::{FOV, HEIGHT, LIGHT_INTENSITY, VIEW_DISTANCE, WIDTH};
 
 // Scene specific structs
 pub struct Scene {
@@ -18,8 +18,8 @@ pub struct Scene {
 }
 
 pub struct Camera {
-    position: Vec3,
-    orientation: EulerAngles,
+    pub position: Vec3,
+    pub orientation: EulerAngles,
 }
 
 pub struct Light {
@@ -154,7 +154,7 @@ impl Scene {
                 let mut light_vec: Vec3 = self.light.position - val.point;
                 light_vec.normalize();
 
-                let intensity = val.normal.dot(light_vec).max(0.0);
+                let intensity = LIGHT_INTENSITY * val.normal.dot(light_vec).max(0.0);
 
                 color.r = ((color.r as f64 / 255.0 * intensity) * 255.0) as u8;
                 color.g = ((color.g as f64 / 255.0 * intensity) * 255.0) as u8;
@@ -203,35 +203,41 @@ impl Scene {
 
 impl Object for Sphere {
     fn intersect(&self, ray: &Ray) -> Option<Hit> {
-        // The vector from the origin of the ray to the center of the circle
-        let l: Vec3 = ray.origin - self.position;
-        let ca: f64 = l.dot(ray.direction);
+        let oc = ray.origin - self.position;
+        let d = ray.direction;
 
-        // The distance squared from the center to the closest point on ray
-        let dist: f64 = l.dot(l) - ca * ca;
-        if dist > self.radius * self.radius {
+        let a = d.dot(d);
+        let half_b = oc.dot(d);
+        let c = oc.dot(oc) - self.radius * self.radius;
+
+        let discriminant = half_b * half_b - a * c;
+        if discriminant < 0.0 {
             return None;
         }
 
-        // Half chord distance of ray in sphere
-        let hc: f64 = f64::sqrt(self.radius * self.radius - dist);
+        let sqrt_discriminant = discriminant.sqrt();
+        let mut t = (-half_b - sqrt_discriminant) / a;
 
-        // Supposed first intersect point
-        let t1: f64 = -ca - hc;
-        if t1 < 0.0 || t1 > (ray.target - ray.origin).magnitude() {
-            None
-        } else {
-            let am = Vec3 {
-                x: ray.direction.x * t1,
-                y: ray.direction.y * t1,
-                z: ray.direction.z * t1,
-            };
-            let point: Vec3 = ray.origin + am;
-            let mut normal: Vec3 = point - self.position;
-            normal.normalize();
-
-            Some(Hit::new(ray.origin, normal, point, self.color))
+        // Edge case when camera is inside the sphere
+        if t < 0.0 {
+            t = (-half_b + sqrt_discriminant) / a;
         }
+
+        if t < 0.0 {
+            return None;
+        }
+
+        let am = Vec3 {
+            x: ray.direction.x * t,
+            y: ray.direction.y * t,
+            z: ray.direction.z * t,
+        };
+
+        let point: Vec3 = ray.origin + am;
+        let mut normal: Vec3 = point - self.position;
+        normal.normalize();
+
+        Some(Hit::new(ray.origin, normal, point, self.color))
     }
 }
 
