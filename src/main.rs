@@ -23,7 +23,10 @@ pub fn main() {
         Err(err) => panic!("Window was not able to be created, {}", err),
     };
 
-    let mut scene = Scene::scene_with_sphere();
+    window.set_target_fps(120);
+    let mut scene: Scene = Scene::scene_with_sphere();
+    let mut angle: f64 = 0.0;
+    let light_spin_radius: f64 = 10.0;
 
     while window.is_open() {
         let buffer: Vec<u32> = scene.render();
@@ -33,6 +36,8 @@ pub fn main() {
             Err(err) => panic!("Error in updating window buffer, {}", err),
         }
 
-        scene.light.position.y += 1.0;
+        scene.light.position.y = -10.0 * light_spin_radius * angle.cos();
+        scene.light.position.z = -10.0 * light_spin_radius * angle.sin();
+        angle += 0.12;
     }
 }

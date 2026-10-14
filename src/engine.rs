@@ -91,7 +91,7 @@ trait Object {
 impl Scene {
     pub fn scene_with_sphere() -> Scene {
         let sphere = Sphere {
-            position: Vec3::new(30.0, 0.0, 0.0),
+            position: Vec3::new(50.0, 0.0, 0.0),
             radius: 10.0,
             color: Color::new(4, 2, 115),
         };
@@ -122,8 +122,8 @@ impl Scene {
         let yaw: Degree = angle.yaw - (FOV as f64 / 2.0).into();
         let pitch: Degree = angle.pitch + total_up_deg;
 
-        let pitch_increments: Degree = (angle.pitch - total_up_deg) / (HEIGHT as f64).into();
-        let yaw_increments: Degree = yaw / (WIDTH as f64).into();
+        let pitch_increments: Degree = (2.0 * total_up_deg.value / (HEIGHT - 1) as f64).into();
+        let yaw_increments: Degree = (FOV as f64 / (WIDTH - 1) as f64).into();
 
         angle.pitch = pitch;
         angle.yaw = yaw;
@@ -133,8 +133,8 @@ impl Scene {
             let rad_yaw = angle.yaw.value * PI / 180.0;
 
             let end_x = cam_pos.x + VIEW_DISTANCE as f64 * rad_pitch.cos() * rad_yaw.cos();
-            let end_y = cam_pos.y + VIEW_DISTANCE as f64 * rad_pitch.sin() * rad_yaw.cos();
-            let end_z = cam_pos.z - VIEW_DISTANCE as f64 * rad_pitch.sin();
+            let end_y = cam_pos.y + VIEW_DISTANCE as f64 * rad_pitch.cos() * rad_yaw.sin();
+            let end_z = cam_pos.z + VIEW_DISTANCE as f64 * rad_pitch.sin();
 
             let target = Vec3::new(end_x, end_y, end_z);
             let res = self.send_ray(cam_pos, target);
@@ -151,13 +151,9 @@ impl Scene {
                         as u8,
                 );
 
-                let mut light_vec = Vec3::new(
-                    val.point.x - self.light.position.x,
-                    val.point.y - self.light.position.y,
-                    val.point.z - self.light.position.z,
-                );
-
+                let mut light_vec: Vec3 = self.light.position - val.point;
                 light_vec.normalize();
+
                 let intensity = val.normal.dot(light_vec).max(0.0);
 
                 color.r = ((color.r as f64 / 255.0 * intensity) * 255.0) as u8;
@@ -181,10 +177,13 @@ impl Scene {
     }
 
     fn send_ray(&self, origin: Vec3, target: Vec3) -> Option<Hit> {
+        let mut direction: Vec3 = target - origin;
+        direction.normalize();
+
         let ray = Ray {
             origin,
             target,
-            direction: target - origin,
+            direction,
         };
 
         for object in &self.objects {
@@ -218,7 +217,7 @@ impl Object for Sphere {
         let hc: f64 = f64::sqrt(self.radius * self.radius - dist);
 
         // Supposed first intersect point
-        let t1: f64 = ca - hc;
+        let t1: f64 = -ca - hc;
         if t1 < 0.0 || t1 > (ray.target - ray.origin).magnitude() {
             None
         } else {
