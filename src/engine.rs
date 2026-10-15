@@ -1,14 +1,16 @@
 // TODO :
-// 1. Implement pitch and yaw shift each loop
-// 2. Render result of Scene::render in main.rs
+// 1. Optimize the raycasting system by a LOT
 
 use std::fmt;
 use std::{
-    f64::consts::PI,
+    f32::consts::PI,
     ops::{Add, Div, Mul, Sub},
 };
 
-use crate::{FOV, HEIGHT, LIGHT_INTENSITY, VIEW_DISTANCE, WIDTH};
+use glam::Vec3A;
+use rayon::prelude::*;
+
+use crate::{FOV, LIGHT_INTENSITY, VIEW_DISTANCE};
 
 // Scene specific structs
 pub struct Scene {
@@ -18,40 +20,40 @@ pub struct Scene {
 }
 
 pub struct Camera {
-    pub position: Vec3,
+    pub position: Vec3A,
     pub orientation: EulerAngles,
 }
 
 pub struct Light {
-    pub position: Vec3,
+    pub position: Vec3A,
     color: Color,
 }
 
 // Object structs
 pub struct Sphere {
-    position: Vec3,
-    radius: f64,
+    position: Vec3A,
+    radius: f32,
     color: Color,
 }
 
 pub struct Cube {
-    position: Vec3,
-    length: f64,
+    position: Vec3A,
+    length: f32,
     orientation: EulerAngles,
     color: Color,
 }
 
 // Raycast specific structs
 pub struct Ray {
-    origin: Vec3,
-    target: Vec3,
-    direction: Vec3,
+    origin: Vec3A,
+    target: Vec3A,
+    direction: Vec3A,
 }
 
 pub struct Hit {
     distance: f32,
-    point: Vec3,
-    normal: Vec3,
+    point: Vec3A,
+    normal: Vec3A,
     surface_color: Color,
 }
 
@@ -61,13 +63,6 @@ pub struct Color {
     pub r: u8,
     pub g: u8,
     pub b: u8,
-}
-
-#[derive(Clone, Copy)]
-pub struct Vec3 {
-    pub x: f64,
-    pub y: f64,
-    pub z: f64,
 }
 
 // Angle related structs
@@ -80,18 +75,18 @@ pub struct EulerAngles {
 
 #[derive(Clone, Copy)]
 pub struct Degree {
-    pub value: f64,
+    pub value: f32,
 }
 
 // traits & implementations
-trait Object {
+trait Object: Send + Sync {
     fn intersect(&self, ray: &Ray) -> Option<Hit>;
 }
 
 impl Scene {
     pub fn scene_with_sphere() -> Scene {
         let sphere = Sphere {
-            position: Vec3::new(50.0, 0.0, 0.0),
+            position: Vec3A::new(50.0, 0.0, 0.0),
             radius: 10.0,
             color: Color::new(4, 2, 115),
         };
@@ -101,84 +96,73 @@ impl Scene {
         Scene {
             objects: vec![boxed],
             camera: Camera::new(
-                Vec3::origin(),
+                Vec3A::ZERO,
                 EulerAngles::new(0.0.into(), 0.0.into(), 0.0.into()),
             ),
             light: Light {
-                position: Vec3::new(-10.0, -10.0, 20.0),
+                position: Vec3A::new(-10.0, -10.0, 20.0),
                 color: Color::new(255, 255, 255),
             },
         }
     }
 
-    pub fn render(&self) -> Vec<u32> {
-        let mut buffer: Vec<u32> = vec![0; WIDTH * HEIGHT];
-        let mut angle: EulerAngles = self.camera.orientation;
-
-        let cam_pos = self.camera.position;
-        let black_pix_val = self.generate_pixel_buf_value(Color::new(0, 0, 0));
-
-        let total_up_deg: Degree = (FOV as f64 / 2.0 * HEIGHT as f64 / WIDTH as f64).into();
-        let yaw: Degree = angle.yaw - (FOV as f64 / 2.0).into();
-        let pitch: Degree = angle.pitch + total_up_deg;
-
-        let pitch_increments: Degree = (2.0 * total_up_deg.value / (HEIGHT - 1) as f64).into();
-        let yaw_increments: Degree = (FOV as f64 / (WIDTH - 1) as f64).into();
-
-        angle.pitch = pitch;
-        angle.yaw = yaw;
-
-        for (i, pix) in buffer.iter_mut().enumerate() {
-            let rad_pitch = angle.pitch.value * PI / 180.0;
-            let rad_yaw = angle.yaw.value * PI / 180.0;
-
-            let end_x = cam_pos.x + VIEW_DISTANCE as f64 * rad_pitch.cos() * rad_yaw.cos();
-            let end_y = cam_pos.y + VIEW_DISTANCE as f64 * rad_pitch.cos() * rad_yaw.sin();
-            let end_z = cam_pos.z + VIEW_DISTANCE as f64 * rad_pitch.sin();
-
-            let target = Vec3::new(end_x, end_y, end_z);
-            let res = self.send_ray(cam_pos, target);
-
-            if let Some(val) = res {
-                let surface_color = val.surface_color;
-
-                let mut color = Color::new(
-                    ((surface_color.r as f64 / 255.0) * (self.light.color.r as f64 / 255.0) * 255.0)
-                        as u8,
-                    ((surface_color.g as f64 / 255.0) * (self.light.color.g as f64 / 255.0) * 255.0)
-                        as u8,
-                    ((surface_color.b as f64 / 255.0) * (self.light.color.b as f64 / 255.0) * 255.0)
-                        as u8,
-                );
-
-                let mut light_vec: Vec3 = self.light.position - val.point;
-                light_vec.normalize();
-
-                let intensity = LIGHT_INTENSITY * val.normal.dot(light_vec).max(0.0);
-
-                color.r = ((color.r as f64 / 255.0 * intensity) * 255.0) as u8;
-                color.g = ((color.g as f64 / 255.0 * intensity) * 255.0) as u8;
-                color.b = ((color.b as f64 / 255.0 * intensity) * 255.0) as u8;
-
-                *pix = self.generate_pixel_buf_value(color);
-            } else {
-                *pix = black_pix_val;
-            }
-
-            if (i + 1) % WIDTH == 0 {
-                angle.yaw = yaw;
-                angle.pitch = angle.pitch - pitch_increments;
-            } else {
-                angle.yaw = angle.yaw + yaw_increments;
-            }
-        }
-
-        buffer
+    pub fn render(&self, width: usize, height: usize) -> Vec<u32> {
+        (0..width * height)
+            .into_par_iter()
+            .map(|i| self.get_pix_color_val(i, width, height))
+            .collect()
     }
 
-    fn send_ray(&self, origin: Vec3, target: Vec3) -> Option<Hit> {
-        let mut direction: Vec3 = target - origin;
-        direction.normalize();
+    fn get_pix_color_val(&self, pix_id: usize, width: usize, height: usize) -> u32 {
+        let cam_angle: EulerAngles = self.camera.orientation;
+        let cam_pos: Vec3A = self.camera.position;
+
+        let column = pix_id % width;
+        let row = pix_id / width;
+
+        let horizontal_fov = FOV as f32;
+        let vertical_fov = horizontal_fov * height as f32 / width as f32;
+
+        let yaw_offset =
+            -horizontal_fov / 2.0 + (column as f32 + 0.5) * horizontal_fov / width as f32;
+
+        let pitch_offset = vertical_fov / 2.0 - (row as f32 + 0.5) * vertical_fov / height as f32;
+
+        let yaw: Degree = cam_angle.yaw + yaw_offset.into();
+        let pitch: Degree = cam_angle.pitch + pitch_offset.into();
+
+        let rad_pitch: f32 = pitch.value * PI / 180.0;
+        let rad_yaw: f32 = yaw.value * PI / 180.0;
+
+        let end_x: f32 = cam_pos.x + VIEW_DISTANCE as f32 * rad_pitch.cos() * rad_yaw.cos();
+        let end_y: f32 = cam_pos.y + VIEW_DISTANCE as f32 * rad_pitch.cos() * rad_yaw.sin();
+        let end_z: f32 = cam_pos.z + VIEW_DISTANCE as f32 * rad_pitch.sin();
+
+        let target: Vec3A = Vec3A::new(end_x, end_y, end_z);
+        let res: Option<Hit> = self.send_ray(cam_pos, target);
+
+        if let Some(val) = res {
+            let surface_color = val.surface_color;
+
+            let light_vec = (self.light.position - val.point).normalize();
+
+            let intensity: f32 = (LIGHT_INTENSITY * val.normal.dot(light_vec)).clamp(0.1, 1.0);
+            let factor: f32 = intensity / 255.0;
+
+            let color = Color::new(
+                (surface_color.r as f32 * self.light.color.r as f32 * factor) as u8,
+                (surface_color.g as f32 * self.light.color.g as f32 * factor) as u8,
+                (surface_color.b as f32 * self.light.color.b as f32 * factor) as u8,
+            );
+
+            self.generate_pixel_buf_value(color)
+        } else {
+            self.generate_pixel_buf_value(Color::new(0, 0, 0))
+        }
+    }
+
+    fn send_ray(&self, origin: Vec3A, target: Vec3A) -> Option<Hit> {
+        let direction: Vec3A = (target - origin).normalize();
 
         let ray = Ray {
             origin,
@@ -227,76 +211,21 @@ impl Object for Sphere {
             return None;
         }
 
-        let am = Vec3 {
-            x: ray.direction.x * t,
-            y: ray.direction.y * t,
-            z: ray.direction.z * t,
-        };
+        let am = Vec3A::new(
+            ray.direction.x * t,
+            ray.direction.y * t,
+            ray.direction.z * t,
+        );
 
-        let point: Vec3 = ray.origin + am;
-        let mut normal: Vec3 = point - self.position;
-        normal.normalize();
+        let point: Vec3A = ray.origin + am;
+        let normal: Vec3A = (point - self.position).normalize();
 
         Some(Hit::new(ray.origin, normal, point, self.color))
     }
 }
 
-impl Vec3 {
-    pub fn new(x: f64, y: f64, z: f64) -> Vec3 {
-        Vec3 { x, y, z }
-    }
-
-    pub fn origin() -> Vec3 {
-        Vec3 {
-            x: 0.0,
-            y: 0.0,
-            z: 0.0,
-        }
-    }
-
-    pub fn dot(&self, other: Vec3) -> f64 {
-        self.x * other.x + self.y * other.y + self.z * other.z
-    }
-
-    pub fn normalize(&mut self) {
-        let magnitude = self.magnitude();
-
-        self.x /= magnitude;
-        self.y /= magnitude;
-        self.z /= magnitude;
-    }
-
-    pub fn magnitude(&self) -> f64 {
-        f64::sqrt(self.x * self.x + self.y * self.y + self.z * self.z)
-    }
-}
-
-impl Sub for Vec3 {
-    type Output = Self;
-
-    fn sub(self, other: Self) -> Self::Output {
-        Vec3 {
-            x: self.x - other.x,
-            y: self.y - other.y,
-            z: self.z - other.z,
-        }
-    }
-}
-
-impl Add for Vec3 {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self::Output {
-        Vec3 {
-            x: self.x + other.x,
-            y: self.y + other.y,
-            z: self.z - other.z,
-        }
-    }
-}
-
 impl Camera {
-    pub fn new(position: Vec3, orientation: EulerAngles) -> Camera {
+    pub fn new(position: Vec3A, orientation: EulerAngles) -> Camera {
         Camera {
             position,
             orientation,
@@ -305,9 +234,9 @@ impl Camera {
 }
 
 impl Hit {
-    pub fn new(origin: Vec3, normal: Vec3, intersect: Vec3, surface_color: Color) -> Hit {
+    pub fn new(origin: Vec3A, normal: Vec3A, intersect: Vec3A, surface_color: Color) -> Hit {
         Hit {
-            distance: (intersect - origin).magnitude() as f32,
+            distance: (intersect - origin).length(),
             point: intersect,
             normal,
             surface_color,
@@ -361,8 +290,8 @@ impl Div for Degree {
     }
 }
 
-impl From<f64> for Degree {
-    fn from(num: f64) -> Self {
+impl From<f32> for Degree {
+    fn from(num: f32) -> Self {
         Degree { value: num }
     }
 }
