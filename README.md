@@ -16,4 +16,6 @@ A simple rendering engine using __raytracing__.
 This project was created with a goal to use as
 little external libraries as possible to test my skill.
 
-The only library it uses is __minifb__ to handle window creation!
+- minifb, to handle window creation and handling!
+- rayon, to optimize the engine.
+- glam, to optimize 3d vectors.
