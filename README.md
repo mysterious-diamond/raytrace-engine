@@ -13,9 +13,19 @@ A simple rendering engine using __raytracing__.
 
 ## Libraries
 
+- __minifb__, to handle window creation and handling!
+- __rayon__, to handle multithreaded rendering.
+- _glam_, to optimize all the 3d math.
+
+## Trivia
+
 This project was created with a goal to use as
 little external libraries as possible to test my skill.
 
-- minifb, to handle window creation and handling!
-- rayon, to optimize the engine.
-- glam, to optimize 3d vectors.
+This project was also created with another goal in mind,
+to use __NO AI GENERATED CODE!__
+
+However, as the math is complex, i had to research with AI to figure out
+the formulas.
+Other than that, the code itself has been completely written by hand,
+which is a personal achievement.
