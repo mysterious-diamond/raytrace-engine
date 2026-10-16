@@ -10,6 +10,7 @@ A simple rendering engine using __raytracing__.
 2. 'S' or DOWN key  -> Move camera backward
 3. 'A' or LEFT key  -> Move camera leftward
 4. 'D' or RIGHT key -> Move camera rightward
+5. While holding your __RMB__, move your mouse in any direction to turn the camera.
 
 ## Libraries
 
