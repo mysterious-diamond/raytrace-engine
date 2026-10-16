@@ -1,13 +1,7 @@
 // TODO :
 // 1. Optimize the raycasting system by a LOT
 
-use std::fmt;
-use std::{
-    f32::consts::PI,
-    ops::{Add, Div, Mul, Sub},
-};
-
-use glam::Vec3A;
+use glam::{Quat, Vec3A};
 use rayon::prelude::*;
 
 use crate::{FOV, LIGHT_INTENSITY, VIEW_DISTANCE};
@@ -21,7 +15,7 @@ pub struct Scene {
 
 pub struct Camera {
     pub position: Vec3A,
-    pub orientation: EulerAngles,
+    pub orientation: Quat,
 }
 
 pub struct Light {
@@ -39,7 +33,7 @@ pub struct Sphere {
 pub struct Cube {
     position: Vec3A,
     length: f32,
-    orientation: EulerAngles,
+    orientation: Quat,
     color: Color,
 }
 
@@ -65,19 +59,6 @@ pub struct Color {
     pub b: u8,
 }
 
-// Angle related structs
-#[derive(Clone, Copy)]
-pub struct EulerAngles {
-    pub roll: Degree,
-    pub pitch: Degree,
-    pub yaw: Degree,
-}
-
-#[derive(Clone, Copy)]
-pub struct Degree {
-    pub value: f32,
-}
-
 // traits & implementations
 trait Object: Send + Sync {
     fn intersect(&self, ray: &Ray) -> Option<Hit>;
@@ -87,7 +68,7 @@ impl Scene {
     pub fn scene_with_sphere() -> Scene {
         let sphere = Sphere {
             position: Vec3A::new(50.0, 0.0, 0.0),
-            radius: 10.0,
+            radius: 20.0,
             color: Color::new(4, 2, 115),
         };
 
@@ -95,10 +76,7 @@ impl Scene {
 
         Scene {
             objects: vec![boxed],
-            camera: Camera::new(
-                Vec3A::ZERO,
-                EulerAngles::new(0.0.into(), 0.0.into(), 0.0.into()),
-            ),
+            camera: Camera::new(Vec3A::ZERO, Quat::IDENTITY),
             light: Light {
                 position: Vec3A::new(-10.0, -10.0, 20.0),
                 color: Color::new(255, 255, 255),
@@ -114,31 +92,28 @@ impl Scene {
     }
 
     fn get_pix_color_val(&self, pix_id: usize, width: usize, height: usize) -> u32 {
-        let cam_angle: EulerAngles = self.camera.orientation;
+        let cam_angle: Quat = self.camera.orientation;
         let cam_pos: Vec3A = self.camera.position;
 
-        let column = pix_id % width;
-        let row = pix_id / width;
+        let column: usize = pix_id % width;
+        let row: usize = pix_id / width;
 
-        let horizontal_fov = FOV as f32;
-        let vertical_fov = horizontal_fov * height as f32 / width as f32;
+        let ndc_x: f32 = (2.0 * column as f32 + 1.0) / width as f32 - 1.0;
+        let ndc_y: f32 = 1.0 - (2.0 * row as f32 + 1.0) / height as f32;
 
-        let yaw_offset =
-            -horizontal_fov / 2.0 + (column as f32 + 0.5) * horizontal_fov / width as f32;
+        let aspect_ratio: f32 = width as f32 / height as f32;
+        let half_fov_tan: f32 = (FOV as f32 / 2.0).to_radians().tan();
 
-        let pitch_offset = vertical_fov / 2.0 - (row as f32 + 0.5) * vertical_fov / height as f32;
+        let screen_x: f32 = ndc_x * half_fov_tan * aspect_ratio;
+        let screen_y: f32 = ndc_y * half_fov_tan;
 
-        let yaw: Degree = cam_angle.yaw + yaw_offset.into();
-        let pitch: Degree = cam_angle.pitch + pitch_offset.into();
+        let forward: Vec3A = cam_angle * Vec3A::X;
+        let right: Vec3A = cam_angle * Vec3A::Z;
+        let up: Vec3A = cam_angle * Vec3A::Y;
 
-        let rad_pitch: f32 = pitch.value * PI / 180.0;
-        let rad_yaw: f32 = yaw.value * PI / 180.0;
+        let ray_dir: Vec3A = (forward + (right * screen_x) + (up * screen_y)).normalize();
 
-        let end_x: f32 = cam_pos.x + VIEW_DISTANCE as f32 * rad_pitch.cos() * rad_yaw.cos();
-        let end_y: f32 = cam_pos.y + VIEW_DISTANCE as f32 * rad_pitch.cos() * rad_yaw.sin();
-        let end_z: f32 = cam_pos.z + VIEW_DISTANCE as f32 * rad_pitch.sin();
-
-        let target: Vec3A = Vec3A::new(end_x, end_y, end_z);
+        let target: Vec3A = cam_pos + (ray_dir * VIEW_DISTANCE as f32);
         let res: Option<Hit> = self.send_ray(cam_pos, target);
 
         if let Some(val) = res {
@@ -157,7 +132,7 @@ impl Scene {
 
             self.generate_pixel_buf_value(color)
         } else {
-            self.generate_pixel_buf_value(Color::new(0, 0, 0))
+            0
         }
     }
 
@@ -181,7 +156,7 @@ impl Scene {
     }
 
     fn generate_pixel_buf_value(&self, color: Color) -> u32 {
-        color.r as u32 | (color.g as u32) << 8 | (color.b as u32) << 16
+        (color.r as u32) << 16 | (color.g as u32) << 8 | color.b as u32
     }
 }
 
@@ -225,7 +200,7 @@ impl Object for Sphere {
 }
 
 impl Camera {
-    pub fn new(position: Vec3A, orientation: EulerAngles) -> Camera {
+    pub fn new(position: Vec3A, orientation: Quat) -> Camera {
         Camera {
             position,
             orientation,
@@ -241,64 +216,6 @@ impl Hit {
             normal,
             surface_color,
         }
-    }
-}
-
-impl EulerAngles {
-    pub fn new(roll: Degree, pitch: Degree, yaw: Degree) -> EulerAngles {
-        EulerAngles { roll, pitch, yaw }
-    }
-}
-
-impl Add for Degree {
-    type Output = Self;
-
-    fn add(self, other: Self) -> Self::Output {
-        Degree {
-            value: (self.value + other.value).rem_euclid(360.0),
-        }
-    }
-}
-
-impl Sub for Degree {
-    type Output = Self;
-
-    fn sub(self, other: Self) -> Self::Output {
-        Degree {
-            value: (self.value - other.value).rem_euclid(360.0),
-        }
-    }
-}
-
-impl Mul for Degree {
-    type Output = Self;
-
-    fn mul(self, other: Self) -> Self::Output {
-        Degree {
-            value: (self.value * other.value).rem_euclid(360.0),
-        }
-    }
-}
-
-impl Div for Degree {
-    type Output = Self;
-
-    fn div(self, other: Self) -> Self::Output {
-        Degree {
-            value: (self.value / other.value).rem_euclid(360.0),
-        }
-    }
-}
-
-impl From<f32> for Degree {
-    fn from(num: f32) -> Self {
-        Degree { value: num }
-    }
-}
-
-impl fmt::Display for Degree {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.value)
     }
 }
 
