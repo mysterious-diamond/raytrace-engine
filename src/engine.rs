@@ -84,6 +84,32 @@ impl Scene {
         }
     }
 
+    pub fn scene_with_2_spheres() -> Scene {
+        let sphere: Sphere = Sphere {
+            position: Vec3A::new(50.0, 0.0, 25.0),
+            radius: 15.0,
+            color: Color::new(4, 2, 115),
+        };
+
+        let sphere2: Sphere = Sphere {
+            position: Vec3A::new(50.0, 0.0, -25.0),
+            radius: 15.0,
+            color: Color::new(115, 2, 4),
+        };
+
+        let boxed: Box<dyn Object + 'static> = Box::new(sphere);
+        let boxed2: Box<dyn Object + 'static> = Box::new(sphere2);
+
+        Scene {
+            objects: vec![boxed, boxed2],
+            camera: Camera::new(Vec3A::ZERO, Quat::IDENTITY),
+            light: Light {
+                position: Vec3A::new(-10.0, -10.0, 20.0),
+                color: Color::new(255, 255, 255),
+            },
+        }
+    }
+
     pub fn render(&self, width: usize, height: usize) -> Vec<u32> {
         (0..width * height)
             .into_par_iter()
@@ -186,11 +212,7 @@ impl Object for Sphere {
             return None;
         }
 
-        let am = Vec3A::new(
-            ray.direction.x * t,
-            ray.direction.y * t,
-            ray.direction.z * t,
-        );
+        let am: Vec3A = ray.direction * t;
 
         let point: Vec3A = ray.origin + am;
         let normal: Vec3A = (point - self.position).normalize();

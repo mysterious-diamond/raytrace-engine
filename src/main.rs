@@ -35,7 +35,7 @@ pub fn main() {
         Err(err) => panic!("app.window was not able to be created, {}", err),
     };
 
-    let scene: Scene = Scene::scene_with_sphere();
+    let scene: Scene = Scene::scene_with_2_spheres();
 
     let mut app: App = App { window, scene };
     let mut is_tracking_mouse: bool = false;
@@ -95,23 +95,16 @@ pub fn main() {
                     let diff_x: f32 = val.0 - last_mouse_pos.0;
                     let diff_y: f32 = val.1 - last_mouse_pos.1;
 
-                    // Accumulate into the PERSISTENT state variables, not temporary extracted angles
                     yaw -= diff_x * MOUSE_SENS;
                     pitch -= diff_y * MOUSE_SENS;
 
-                    // Clamp the persistent pitch
                     let max_pitch: f32 = 89.0f32.to_radians();
                     pitch = pitch.clamp(-max_pitch, max_pitch);
 
                     yaw = yaw.rem_euclid(TAU);
 
-                    // Reconstruct the orientation using matching order
-                    app.scene.camera.orientation = glam::Quat::from_euler(
-                        glam::EulerRot::YZX,
-                        yaw,
-                        pitch,
-                        0.0, // Roll around X is kept at 0
-                    );
+                    app.scene.camera.orientation =
+                        glam::Quat::from_euler(glam::EulerRot::YZX, yaw, pitch, 0.0);
 
                     last_mouse_pos = val;
                 }
